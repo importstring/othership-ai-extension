@@ -1,58 +1,86 @@
-// Helper: Get the selected email content (simple example; adjust as needed)
-function getSelectedEmailContent() {
+const getSelectedEmailContent = () => {
   const emailElement = document.querySelector(".email-body");
   return emailElement ? emailElement.innerText : "";
-}
+};
 
-// Helper: Insert the AI-generated draft response into the compose box
-function insertDraftResponse(responseText) {
+const insertDraftResponse = (responseText) => {
   const composeBox = document.querySelector('[role="dialog"]');
   if (composeBox) {
-    const draftInput = composeBox.querySelector(
-      'div[aria-label="Message Body"]'
-    );
+    const draftInput = composeBox.querySelector('div[aria-label="Message Body"]');
     if (draftInput) {
       draftInput.focus();
-      // Using execCommand for simplicity – depending on Gmail updates this might change.
       document.execCommand("insertText", false, responseText);
     }
   }
-}
+};
 
-// Function to inject the AI suggestion button into Gmail’s compose dialog
-const injectReplyButton = () => {
+const createContextItem = (ctx) => {
+  const item = document.createElement('div');
+  item.className = 'context-item';
+  item.innerHTML = `
+    <div class="context-content">${ctx.content.substring(0, 50)}...</div>
+    <div class="context-time">${new Date(ctx.timestamp).toLocaleString()}</div>
+  `;
+  item.onclick = () => loadContext(ctx.id);
+  return item;
+};
+
+const injectUIComponents = () => {
   const composeBox = document.querySelector('[role="dialog"]');
   if (!composeBox) return;
 
-  const aiButton = document.createElement("div");
-  aiButton.innerHTML = `
-      <div style="padding: 8px; margin: 5px; cursor: pointer; background: #4285f4; color: white; border-radius: 4px;">
-        ✨ AI Suggest
-      </div>`;
-
-  aiButton.addEventListener("click", async () => {
-    const emailText = getSelectedEmailContent();
+  // AI Response Button
+  const aiButton = document.createElement('button');
+  aiButton.innerHTML = '🤖 AI Suggest';
+  aiButton.style.cssText = 'margin: 8px; padding: 8px 12px;';
+  aiButton.onclick = async () => {
     const response = await chrome.runtime.sendMessage({
       action: "generateResponse",
-      email: emailText,
+      email: getSelectedEmailContent()
     });
     insertDraftResponse(response.draft);
+  };
+
+  // Save Context Button
+  const saveButton = document.createElement('button');
+  saveButton.innerHTML = '💾 Save Context';
+  saveButton.style.cssText = 'margin-left: 8px; padding: 8px 12px;';
+  saveButton.onclick = () => chrome.runtime.sendMessage({
+    action: "saveConversation",
+    content: getSelectedEmailContent()
   });
 
-  // Insert the button into the compose dialog header (adjust selector as needed)
-  const headerBar = composeBox.querySelector(".dC");
-  if (headerBar) {
-    headerBar.prepend(aiButton);
-  }
+  // UI Container
+  const buttonContainer = document.createElement('div');
+  buttonContainer.style.cssText = 'display: flex; align-items: center; padding: 8px;';
+  buttonContainer.append(aiButton, saveButton);
+  composeBox.prepend(buttonContainer);
+
+  // History Panel
+  const historyPanel = document.createElement('div');
+  historyPanel.id = 'ai-context-panel';
+  historyPanel.style.cssText = `
+    position: fixed;
+    right: 20px;
+    top: 20px;
+    width: 300px;
+    background: white;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    padding: 16px;
+    z-index: 1000;
+  `;
+  historyPanel.innerHTML = '<h3>Conversation History</h3>';
+  const list = document.createElement('div');
+  historyPanel.appendChild(list);
+  document.body.appendChild(historyPanel);
+
+  // Load initial history
+  chrome.storage.local.get(['conversations'], ({ conversations }) => {
+    conversations?.forEach(ctx => {
+      list.appendChild(createContextItem(ctx));
+    });
+  });
 };
 
-// Use MutationObserver to watch for Gmail's compose dialog appearance dynamically
-const observer = new MutationObserver(() => {
-  const dialog = document.querySelector('[role="dialog"]');
-  if (dialog) {
-    injectReplyButton();
-  }
-});
-
-// Start observing the DOM
-observer.observe(document.body, { childList: true, subtree: true });
+// Initial injection
+setTimeout(injectUIComponents, 2000);
